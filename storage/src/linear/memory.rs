@@ -60,6 +60,8 @@ impl ReadableStorage for MemStore {
     fn size(&self) -> Result<u64, FileIoError> {
         Ok(self.bytes.lock().expect("poisoned lock").len() as u64)
     }
+
+    fn log(&self, _: String) {}
 }
 
 #[expect(clippy::unwrap_used)]

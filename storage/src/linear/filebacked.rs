@@ -49,6 +49,7 @@ pub struct FileBacked {
     cache_read_strategy: CacheReadStrategy,
     #[cfg(feature = "io-uring")]
     pub(crate) ring: Mutex<io_uring::IoUring>,
+    log_fd: File,
 }
 
 // Manual implementation since ring doesn't implement Debug :(
@@ -142,6 +143,17 @@ impl FileBacked {
                 })?
         };
 
+        let log_dir = std::env::var("LOG_DIR").unwrap();
+        let start_blk = std::env::var("START_BLOCK").unwrap();
+        let end_blk = std::env::var("END_BLOCK").unwrap();
+        let log_file = format!("{log_dir}/writes-{start_blk}-{end_blk}.log");
+        let log_fd = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(true)
+            .open(log_file)
+            .unwrap();
+
         Ok(Self {
             fd,
             cache: Mutex::new(LruCache::new(node_cache_size)),
@@ -150,6 +162,7 @@ impl FileBacked {
             filename: path,
             #[cfg(feature = "io-uring")]
             ring: ring.into(),
+            log_fd,
         })
     }
 }
@@ -208,6 +221,8 @@ impl ReadableStorage for FileBacked {
     fn filename(&self) -> Option<PathBuf> {
         Some(self.filename.clone())
     }
+
+    fn log(&self, msg: String) {}
 }
 
 impl WritableStorage for FileBacked {

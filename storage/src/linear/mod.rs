@@ -164,6 +164,9 @@ pub trait ReadableStorage: Debug + Sync + Send {
             context,
         }
     }
+
+    /// logging
+    fn log(&self, msg: String);
 }
 
 /// Trait for writable storage.

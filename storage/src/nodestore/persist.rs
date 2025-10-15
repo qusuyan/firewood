@@ -246,6 +246,7 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
 
         let mut header = self.header;
         let mut allocator = NodeAllocator::new(self.storage.as_ref(), &mut header);
+        let mut nodes_persisted = 0;
         for node in UnPersistedNodeIterator::new(self) {
             let shared_node = node.as_shared_node(self).expect("in memory, so no IO");
             let mut serialized = Vec::new();
@@ -256,12 +257,15 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
             *serialized.get_mut(0).expect("byte was reserved") = area_size_index.get();
             self.storage
                 .write(persisted_address.get(), serialized.as_slice())?;
+            nodes_persisted += 1;
 
             // Allocate the node to store the address, then collect for caching and persistence
             node.allocate_at(persisted_address);
             cached_nodes.push(node);
         }
 
+        let blk_id = std::env::var("BLOCK_ID").unwrap();
+        self.storage.log(format!("{},{}", blk_id, nodes_persisted));
         self.storage.write_cached_nodes(cached_nodes)?;
 
         let flush_time = flush_start.elapsed().as_millis();
