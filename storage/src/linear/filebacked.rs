@@ -24,7 +24,7 @@
 )]
 
 use std::fs::{File, OpenOptions};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::num::NonZero;
 #[cfg(unix)]
 use std::os::unix::fs::FileExt;
@@ -49,7 +49,7 @@ pub struct FileBacked {
     cache_read_strategy: CacheReadStrategy,
     #[cfg(feature = "io-uring")]
     pub(crate) ring: Mutex<io_uring::IoUring>,
-    log_fd: File,
+    log_fd: Mutex<File>,
 }
 
 // Manual implementation since ring doesn't implement Debug :(
@@ -162,7 +162,7 @@ impl FileBacked {
             filename: path,
             #[cfg(feature = "io-uring")]
             ring: ring.into(),
-            log_fd,
+            log_fd: Mutex::new(log_fd),
         })
     }
 }
@@ -222,7 +222,10 @@ impl ReadableStorage for FileBacked {
         Some(self.filename.clone())
     }
 
-    fn log(&self, msg: String) {}
+    fn log(&self, msg: String) {
+        let mut guard = self.log_fd.lock().unwrap();
+        guard.write_all(msg.as_bytes()).unwrap();
+    }
 }
 
 impl WritableStorage for FileBacked {
