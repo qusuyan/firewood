@@ -264,9 +264,13 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
             cached_nodes.push(node);
         }
 
-        let blk_id = std::env::var("BLOCK_ID").unwrap();
-        self.storage
-            .log(format!("{},{}\n", blk_id, nodes_persisted));
+        use crate::HashedNodeReader;
+        if let Some(root) = self.root_hash() {
+            self.storage.log(format!("{},{}\n", root, nodes_persisted));
+        } else {
+            assert!(self.root_node().is_none());
+            self.storage.log(format!(",{}\n", nodes_persisted));
+        }
         self.storage.write_cached_nodes(cached_nodes)?;
 
         let flush_time = flush_start.elapsed().as_millis();
@@ -381,7 +385,7 @@ impl NodeStore<Committed, FileBacked> {
             RINGSIZE
         ];
 
-        let mut num_persisted_nodes = 0;
+        let mut nodes_persisted = 0;
         // Process each unpersisted node directly from the iterator
         for node in UnPersistedNodeIterator::new(self) {
             let shared_node = node.as_shared_node(self).expect("in memory, so no IO");
@@ -442,7 +446,7 @@ impl NodeStore<Committed, FileBacked> {
                 )?;
             }
 
-            num_persisted_nodes += 1;
+            nodes_persisted += 1;
 
             // Allocate the node to store the address, then collect for caching and persistence
             node.allocate_at(persisted_address);
@@ -471,9 +475,12 @@ impl NodeStore<Committed, FileBacked> {
         let flush_time = flush_start.elapsed().as_millis();
         firewood_counter!("firewood.flush_nodes", "amount flushed nodes").increment(flush_time);
 
-        let root = self.root_hash().unwrap();
-        self.storage
-            .log(format!("{},{}\n", root, num_persisted_nodes));
+        if let Some(root) = self.root_hash() {
+            self.storage.log(format!("{},{}\n", root, nodes_persisted));
+        } else {
+            assert!(self.root_node().is_none());
+            self.storage.log(format!(",{}\n", nodes_persisted));
+        }
 
         Ok(header)
     }
