@@ -316,7 +316,7 @@ impl NodeStore<Committed, FileBacked> {
     #[fastrace::trace(short_name = true)]
     #[cfg(feature = "io-uring")]
     fn flush_nodes_io_uring(&mut self) -> Result<NodeStoreHeader, FileIoError> {
-        use crate::LinearAddress;
+        use crate::{HashedNodeReader, LinearAddress};
         use std::pin::Pin;
 
         #[derive(Clone, Debug)]
@@ -471,9 +471,9 @@ impl NodeStore<Committed, FileBacked> {
         let flush_time = flush_start.elapsed().as_millis();
         firewood_counter!("firewood.flush_nodes", "amount flushed nodes").increment(flush_time);
 
-        let blk_id = std::env::var("BLOCK_ID").unwrap();
+        let root = self.root_hash().unwrap();
         self.storage
-            .log(format!("{},{}\n", blk_id, num_persisted_nodes));
+            .log(format!("{},{}\n", root, num_persisted_nodes));
 
         Ok(header)
     }
