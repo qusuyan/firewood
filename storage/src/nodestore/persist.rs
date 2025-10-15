@@ -265,7 +265,8 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
         }
 
         let blk_id = std::env::var("BLOCK_ID").unwrap();
-        self.storage.log(format!("{},{}", blk_id, nodes_persisted));
+        self.storage
+            .log(format!("{},{}\n", blk_id, nodes_persisted));
         self.storage.write_cached_nodes(cached_nodes)?;
 
         let flush_time = flush_start.elapsed().as_millis();
@@ -472,7 +473,7 @@ impl NodeStore<Committed, FileBacked> {
 
         let blk_id = std::env::var("BLOCK_ID").unwrap();
         self.storage
-            .log(format!("{},{}", blk_id, num_persisted_nodes));
+            .log(format!("{},{}\n", blk_id, num_persisted_nodes));
 
         Ok(header)
     }
