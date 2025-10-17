@@ -249,7 +249,7 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
         let mut nodes_persisted = 0;
         let mut bytes_written = 0;
         let mut leaf_nodes = 0;
-        let mut leaf_bytes = 0;
+        let mut leaf_value_bytes = 0;
         let mut branch_factors = 0;
         for node in UnPersistedNodeIterator::new(self) {
             let shared_node = node.as_shared_node(self).expect("in memory, so no IO");
@@ -267,9 +267,9 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
                 Node::Branch(branch) => {
                     branch_factors += branch.children_iter().count();
                 }
-                Node::Leaf(_) => {
+                Node::Leaf(leaf) => {
                     leaf_nodes += 1;
-                    leaf_bytes += serialized.len();
+                    leaf_value_bytes += leaf.value.len();
                 }
             }
 
@@ -282,13 +282,13 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
         if let Some(root) = self.root_hash() {
             self.storage.log(format!(
                 "{},{},{},{},{},{}\n",
-                root, nodes_persisted, bytes_written, branch_factors, leaf_nodes, leaf_bytes
+                root, nodes_persisted, bytes_written, branch_factors, leaf_nodes, leaf_value_bytes
             ));
         } else {
             assert!(self.root_node().is_none());
             self.storage.log(format!(
                 ",{},{},{},{},{}\n",
-                nodes_persisted, bytes_written, branch_factors, leaf_nodes, leaf_bytes
+                nodes_persisted, bytes_written, branch_factors, leaf_nodes, leaf_value_bytes
             ));
         }
         self.storage.write_cached_nodes(cached_nodes)?;
