@@ -29,9 +29,9 @@
 
 use std::iter::FusedIterator;
 
-use crate::firewood_counter;
 use crate::linear::FileIoError;
 use crate::nodestore::AreaIndex;
+use crate::{Node, firewood_counter};
 use coarsetime::Instant;
 
 #[cfg(feature = "io-uring")]
@@ -247,6 +247,9 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
         let mut header = self.header;
         let mut allocator = NodeAllocator::new(self.storage.as_ref(), &mut header);
         let mut nodes_persisted = 0;
+        let mut bytes_written = 0;
+        let mut leaf_nodes = 0;
+        let mut branch_factors = 0;
         for node in UnPersistedNodeIterator::new(self) {
             let shared_node = node.as_shared_node(self).expect("in memory, so no IO");
             let mut serialized = Vec::new();
@@ -258,6 +261,13 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
             self.storage
                 .write(persisted_address.get(), serialized.as_slice())?;
             nodes_persisted += 1;
+            bytes_written += serialized.len();
+            match shared_node.as_ref() {
+                Node::Branch(branch) => {
+                    branch_factors += branch.children_iter().count();
+                }
+                Node::Leaf(_) => leaf_nodes += 1,
+            }
 
             // Allocate the node to store the address, then collect for caching and persistence
             node.allocate_at(persisted_address);
@@ -266,10 +276,16 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
 
         use crate::HashedNodeReader;
         if let Some(root) = self.root_hash() {
-            self.storage.log(format!("{},{}\n", root, nodes_persisted));
+            self.storage.log(format!(
+                "{},{},{},{},{}\n",
+                root, nodes_persisted, bytes_written, leaf_nodes, branch_factors
+            ));
         } else {
             assert!(self.root_node().is_none());
-            self.storage.log(format!(",{}\n", nodes_persisted));
+            self.storage.log(format!(
+                ",{},{},{},{}\n",
+                nodes_persisted, bytes_written, leaf_nodes, branch_factors
+            ));
         }
         self.storage.write_cached_nodes(cached_nodes)?;
 
