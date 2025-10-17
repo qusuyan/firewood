@@ -249,6 +249,7 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
         let mut nodes_persisted = 0;
         let mut bytes_written = 0;
         let mut leaf_nodes = 0;
+        let mut leaf_bytes = 0;
         let mut branch_factors = 0;
         for node in UnPersistedNodeIterator::new(self) {
             let shared_node = node.as_shared_node(self).expect("in memory, so no IO");
@@ -266,7 +267,10 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
                 Node::Branch(branch) => {
                     branch_factors += branch.children_iter().count();
                 }
-                Node::Leaf(_) => leaf_nodes += 1,
+                Node::Leaf(_) => {
+                    leaf_nodes += 1;
+                    leaf_bytes += serialized.len();
+                }
             }
 
             // Allocate the node to store the address, then collect for caching and persistence
@@ -277,14 +281,14 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
         use crate::HashedNodeReader;
         if let Some(root) = self.root_hash() {
             self.storage.log(format!(
-                "{},{},{},{},{}\n",
-                root, nodes_persisted, bytes_written, leaf_nodes, branch_factors
+                "{},{},{},{},{},{}\n",
+                root, nodes_persisted, bytes_written, branch_factors, leaf_nodes, leaf_bytes
             ));
         } else {
             assert!(self.root_node().is_none());
             self.storage.log(format!(
-                ",{},{},{},{}\n",
-                nodes_persisted, bytes_written, leaf_nodes, branch_factors
+                ",{},{},{},{},{}\n",
+                nodes_persisted, bytes_written, branch_factors, leaf_nodes, leaf_bytes
             ));
         }
         self.storage.write_cached_nodes(cached_nodes)?;
