@@ -406,8 +406,14 @@ impl NodeStore<Committed, FileBacked> {
         ];
 
         let mut nodes_persisted = 0;
+        let mut bytes_written = 0;
+        let mut leaf_nodes = 0;
+        let mut leaf_value_bytes = 0;
+        let mut branch_factors = 0;
         // Process each unpersisted node directly from the iterator
         for node in UnPersistedNodeIterator::new(self) {
+            use crate::node::branch;
+
             let shared_node = node.as_shared_node(self).expect("in memory, so no IO");
             let mut serialized = Vec::with_capacity(100); // TODO: better size? we can guess branches are larger
             shared_node.as_bytes(AreaIndex::MIN, &mut serialized);
@@ -467,6 +473,16 @@ impl NodeStore<Committed, FileBacked> {
             }
 
             nodes_persisted += 1;
+            bytes_written += 1;
+            match shared_node.as_ref() {
+                Node::Branch(branch) => {
+                    branch_factors += branch.children_iter().count();
+                }
+                Node::Leaf(leaf) => {
+                    leaf_nodes += 1;
+                    leaf_value_bytes += leaf.value.len();
+                }
+            }
 
             // Allocate the node to store the address, then collect for caching and persistence
             node.allocate_at(persisted_address);
@@ -496,10 +512,16 @@ impl NodeStore<Committed, FileBacked> {
         firewood_counter!("firewood.flush_nodes", "amount flushed nodes").increment(flush_time);
 
         if let Some(root) = self.root_hash() {
-            self.storage.log(format!("{},{}\n", root, nodes_persisted));
+            self.storage.log(format!(
+                "{},{},{},{},{},{}\n",
+                root, nodes_persisted, bytes_written, branch_factors, leaf_nodes, leaf_value_bytes
+            ));
         } else {
             assert!(self.root_node().is_none());
-            self.storage.log(format!(",{}\n", nodes_persisted));
+            self.storage.log(format!(
+                ",{},{},{},{},{}\n",
+                nodes_persisted, bytes_written, branch_factors, leaf_nodes, leaf_value_bytes
+            ));
         }
 
         Ok(header)
