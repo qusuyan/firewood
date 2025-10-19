@@ -287,7 +287,7 @@ pub enum CheckerError {
     },
 
     /// IO error
-    #[error("IO error")]
+    #[error("IO error at {parent:x}: {error:?}")]
     #[derive_where(skip_inner)]
     IO {
         /// The error
