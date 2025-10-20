@@ -9,6 +9,7 @@ use clap::{Parser, Subcommand};
 use firewood::v2::api;
 
 pub mod check;
+pub mod clear_freelist;
 pub mod create;
 pub mod delete;
 pub mod dump;
@@ -69,6 +70,7 @@ enum Commands {
     Graph(graph::Options),
     /// Runs the checker on the database
     Check(check::Options),
+    ClearFreelist(clear_freelist::Options),
 }
 
 fn main() -> Result<(), api::Error> {
@@ -87,6 +89,7 @@ fn main() -> Result<(), api::Error> {
         Commands::Dump(opts) => dump::run(opts),
         Commands::Graph(opts) => graph::run(opts),
         Commands::Check(opts) => check::run(opts),
+        Commands::ClearFreelist(opts) => clear_freelist::run(opts),
     }
 }
 
