@@ -157,6 +157,13 @@ impl<S: ReadableStorage> NodeStore<Committed, S> {
     }
 }
 
+impl<T, S: WritableStorage> NodeStore<T, S> {
+    pub fn clear_freelist(&mut self) -> Result<(), FileIoError> {
+        *self.header.free_lists_mut() = Default::default();
+        self.flush_header()
+    }
+}
+
 /// Some nodestore kinds implement Parentable.
 ///
 /// This means that the nodestore can have children.
