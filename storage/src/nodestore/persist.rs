@@ -511,7 +511,7 @@ impl NodeStore<Committed, FileBacked> {
             nodes: nodes_persisted,
             bytes: bytes_written,
             leaf_nodes,
-            leaf_value_bytes: leaf_value_bytes,
+            leaf_value_bytes,
             node_branches: branch_factors,
         };
         self.storage.log(self.root_hash(), write_stats);

@@ -36,7 +36,7 @@ use std::sync::Mutex;
 use lru::LruCache;
 use metrics::counter;
 
-use crate::{CacheReadStrategy, LinearAddress, MaybePersistedNode, SharedNode, TrieHash};
+use crate::{CacheReadStrategy, LinearAddress, MaybePersistedNode, Node, SharedNode, TrieHash};
 
 use super::{FileIoError, IOStats, OffsetReader, ReadableStorage, WritableStorage};
 
@@ -50,7 +50,7 @@ pub struct FileBacked {
     #[cfg(feature = "io-uring")]
     pub(crate) ring: Mutex<io_uring::IoUring>,
     // Metrics
-    log: Mutex<(File, IOStats, usize)>, // (log file, read stats, cache hits)
+    log: Mutex<(File, IOStats, IOStats)>, // (log file, read stats, cache hits)
 }
 
 // Manual implementation since ring doesn't implement Debug :(
@@ -163,7 +163,7 @@ impl FileBacked {
             filename: path,
             #[cfg(feature = "io-uring")]
             ring: ring.into(),
-            log: Mutex::new((log_fd, IOStats::default(), 0)),
+            log: Mutex::new((log_fd, IOStats::default(), IOStats::default())),
         })
     }
 }
@@ -187,9 +187,19 @@ impl ReadableStorage for FileBacked {
         let cached = guard.get(&addr).cloned();
         counter!("firewood.cache.node", "mode" => mode, "type" => if cached.is_some() { "hit" } else { "miss" })
             .increment(1);
-        if cached.is_some() {
+        if let Some(node) = &cached {
             let mut log_guard = self.log.lock().unwrap();
-            log_guard.2 += 1; // increment cache hits
+            let cached_read_stats = &mut log_guard.2;
+            cached_read_stats.nodes += 1;
+            match node.as_ref() {
+                Node::Branch(branch) => {
+                    cached_read_stats.node_branches += branch.children_iter().count();
+                }
+                Node::Leaf(leaf) => {
+                    cached_read_stats.leaf_nodes += 1;
+                    cached_read_stats.leaf_value_bytes += leaf.value.len();
+                }
+            }
         }
         cached
     }
@@ -229,17 +239,21 @@ impl ReadableStorage for FileBacked {
 
     fn log(&self, root_hash: Option<TrieHash>, write_stats: IOStats) {
         let mut guard = self.log.lock().unwrap();
-        let (fd, read_stats, cache_hits) = &mut *guard;
+        let (fd, missed_read_stats, cached_read_stats) = &mut *guard;
         let msg = match root_hash {
             Some(hash) => format!(
-                "{},{},{},{},{},{},{},{},{},{},{},{}\n",
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
                 hash,
-                read_stats.nodes,
-                read_stats.bytes,
-                read_stats.node_branches,
-                read_stats.leaf_nodes,
-                read_stats.leaf_value_bytes,
-                cache_hits,
+                missed_read_stats.nodes,
+                missed_read_stats.bytes,
+                missed_read_stats.node_branches,
+                missed_read_stats.leaf_nodes,
+                missed_read_stats.leaf_value_bytes,
+                cached_read_stats.nodes,
+                cached_read_stats.bytes,
+                cached_read_stats.node_branches,
+                cached_read_stats.leaf_nodes,
+                cached_read_stats.leaf_value_bytes,
                 write_stats.nodes,
                 write_stats.bytes,
                 write_stats.node_branches,
@@ -247,13 +261,17 @@ impl ReadableStorage for FileBacked {
                 write_stats.leaf_value_bytes
             ),
             None => format!(
-                ",{},{},{},{},{},{},{},{},{},{},{}\n",
-                read_stats.nodes,
-                read_stats.bytes,
-                read_stats.node_branches,
-                read_stats.leaf_nodes,
-                read_stats.leaf_value_bytes,
-                cache_hits,
+                ",{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+                missed_read_stats.nodes,
+                missed_read_stats.bytes,
+                missed_read_stats.node_branches,
+                missed_read_stats.leaf_nodes,
+                missed_read_stats.leaf_value_bytes,
+                cached_read_stats.nodes,
+                cached_read_stats.bytes,
+                cached_read_stats.node_branches,
+                cached_read_stats.leaf_nodes,
+                cached_read_stats.leaf_value_bytes,
                 write_stats.nodes,
                 write_stats.bytes,
                 write_stats.node_branches,
@@ -262,21 +280,24 @@ impl ReadableStorage for FileBacked {
             ),
         };
         // reset read stats
-        *read_stats = IOStats::default();
-        *cache_hits = 0;
+        *missed_read_stats = IOStats::default();
+        *cached_read_stats = IOStats::default();
         fd.write_all(msg.as_bytes()).unwrap();
     }
 
     fn record_node_read(&self, node: &SharedNode, length: usize) {
         let guard = &mut self.log.lock().unwrap();
-        let read_stats = &mut guard.1;
-        read_stats.nodes += 1;
-        read_stats.bytes += length;
-        if node.is_leaf() {
-            read_stats.leaf_nodes += 1;
-            read_stats.leaf_value_bytes += length;
-        } else {
-            read_stats.node_branches += 1;
+        let missed_read_stats = &mut guard.1;
+        missed_read_stats.nodes += 1;
+        missed_read_stats.bytes += length;
+        match node.as_ref() {
+            Node::Branch(branch) => {
+                missed_read_stats.node_branches += branch.children_iter().count();
+            }
+            Node::Leaf(leaf) => {
+                missed_read_stats.leaf_nodes += 1;
+                missed_read_stats.leaf_value_bytes += leaf.value.len();
+            }
         }
     }
 }
