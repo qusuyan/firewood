@@ -36,9 +36,9 @@ use std::sync::Mutex;
 use lru::LruCache;
 use metrics::counter;
 
-use crate::{CacheReadStrategy, LinearAddress, MaybePersistedNode, SharedNode};
+use crate::{CacheReadStrategy, LinearAddress, MaybePersistedNode, SharedNode, TrieHash};
 
-use super::{FileIoError, OffsetReader, ReadableStorage, WritableStorage};
+use super::{FileIoError, IOStats, OffsetReader, ReadableStorage, WritableStorage};
 
 /// A [`ReadableStorage`] and [`WritableStorage`] backed by a file
 pub struct FileBacked {
@@ -49,7 +49,8 @@ pub struct FileBacked {
     cache_read_strategy: CacheReadStrategy,
     #[cfg(feature = "io-uring")]
     pub(crate) ring: Mutex<io_uring::IoUring>,
-    log_fd: Mutex<File>,
+    // Metrics
+    log: Mutex<(File, IOStats)>,
 }
 
 // Manual implementation since ring doesn't implement Debug :(
@@ -162,7 +163,7 @@ impl FileBacked {
             filename: path,
             #[cfg(feature = "io-uring")]
             ring: ring.into(),
-            log_fd: Mutex::new(log_fd),
+            log: Mutex::new((log_fd, IOStats::default())),
         })
     }
 }
@@ -222,9 +223,54 @@ impl ReadableStorage for FileBacked {
         Some(self.filename.clone())
     }
 
-    fn log(&self, msg: String) {
-        let mut guard = self.log_fd.lock().unwrap();
-        guard.write_all(msg.as_bytes()).unwrap();
+    fn log(&self, root_hash: Option<TrieHash>, write_stats: IOStats) {
+        let mut guard = self.log.lock().unwrap();
+        let read_stats = &mut guard.1;
+        let msg = match root_hash {
+            Some(hash) => format!(
+                "{},{},{},{},{},{},{},{},{},{},{}\n",
+                hash,
+                read_stats.nodes,
+                read_stats.bytes,
+                read_stats.node_branches,
+                read_stats.leaf_nodes,
+                read_stats.leaf_value_bytes,
+                write_stats.nodes,
+                write_stats.bytes,
+                write_stats.node_branches,
+                write_stats.leaf_nodes,
+                write_stats.leaf_value_bytes
+            ),
+            None => format!(
+                ",{},{},{},{},{},{},{},{},{},{}\n",
+                read_stats.nodes,
+                read_stats.bytes,
+                read_stats.node_branches,
+                read_stats.leaf_nodes,
+                read_stats.leaf_value_bytes,
+                write_stats.nodes,
+                write_stats.bytes,
+                write_stats.node_branches,
+                write_stats.leaf_nodes,
+                write_stats.leaf_value_bytes
+            ),
+        };
+        // reset read stats
+        *read_stats = IOStats::default();
+        guard.0.write_all(msg.as_bytes()).unwrap();
+    }
+
+    fn record_node_read(&self, node: &SharedNode, length: usize) {
+        let guard = &mut self.log.lock().unwrap();
+        let read_stats = &mut guard.1;
+        read_stats.nodes += 1;
+        read_stats.bytes += length;
+        if node.is_leaf() {
+            read_stats.leaf_nodes += 1;
+            read_stats.leaf_value_bytes += length;
+        } else {
+            read_stats.node_branches += 1;
+        }
     }
 }
 

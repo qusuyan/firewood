@@ -24,7 +24,7 @@ use std::io::{Cursor, Read};
 use std::ops::Deref;
 use std::path::PathBuf;
 
-use crate::{CacheReadStrategy, LinearAddress, MaybePersistedNode, SharedNode};
+use crate::{CacheReadStrategy, LinearAddress, MaybePersistedNode, SharedNode, TrieHash};
 pub(super) mod filebacked;
 pub mod memory;
 
@@ -111,6 +111,16 @@ impl Deref for FileIoError {
         &self.inner
     }
 }
+
+#[derive(Debug, Default)]
+pub struct IOStats {
+    pub nodes: usize,
+    pub bytes: usize,
+    pub leaf_nodes: usize, // branch_nodes = nodes - leaf_nodes
+    pub leaf_value_bytes: usize,
+    pub node_branches: usize,
+}
+
 /// Trait for readable storage.
 pub trait ReadableStorage: Debug + Sync + Send {
     /// Stream data from the specified address.
@@ -166,7 +176,10 @@ pub trait ReadableStorage: Debug + Sync + Send {
     }
 
     /// logging
-    fn log(&self, msg: String);
+    fn log(&self, _root_hash: Option<TrieHash>, _write_stats: IOStats) {}
+
+    /// record node read
+    fn record_node_read(&self, _node: &SharedNode, _length: usize) {}
 }
 
 /// Trait for writable storage.
