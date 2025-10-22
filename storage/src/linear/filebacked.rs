@@ -50,7 +50,7 @@ pub struct FileBacked {
     #[cfg(feature = "io-uring")]
     pub(crate) ring: Mutex<io_uring::IoUring>,
     // Metrics
-    log: Mutex<(File, IOStats)>,
+    log: Mutex<(File, IOStats, usize)>, // (log file, read stats, cache hits)
 }
 
 // Manual implementation since ring doesn't implement Debug :(
@@ -163,7 +163,7 @@ impl FileBacked {
             filename: path,
             #[cfg(feature = "io-uring")]
             ring: ring.into(),
-            log: Mutex::new((log_fd, IOStats::default())),
+            log: Mutex::new((log_fd, IOStats::default(), 0)),
         })
     }
 }
@@ -187,6 +187,10 @@ impl ReadableStorage for FileBacked {
         let cached = guard.get(&addr).cloned();
         counter!("firewood.cache.node", "mode" => mode, "type" => if cached.is_some() { "hit" } else { "miss" })
             .increment(1);
+        if cached.is_some() {
+            let mut log_guard = self.log.lock().unwrap();
+            log_guard.2 += 1; // increment cache hits
+        }
         cached
     }
 
@@ -226,15 +230,17 @@ impl ReadableStorage for FileBacked {
     fn log(&self, root_hash: Option<TrieHash>, write_stats: IOStats) {
         let mut guard = self.log.lock().unwrap();
         let read_stats = &mut guard.1;
+        let cache_hits = &mut guard.2;
         let msg = match root_hash {
             Some(hash) => format!(
-                "{},{},{},{},{},{},{},{},{},{},{}\n",
+                "{},{},{},{},{},{},{},{},{},{},{},{}\n",
                 hash,
                 read_stats.nodes,
                 read_stats.bytes,
                 read_stats.node_branches,
                 read_stats.leaf_nodes,
                 read_stats.leaf_value_bytes,
+                cache_hits,
                 write_stats.nodes,
                 write_stats.bytes,
                 write_stats.node_branches,
@@ -242,12 +248,13 @@ impl ReadableStorage for FileBacked {
                 write_stats.leaf_value_bytes
             ),
             None => format!(
-                ",{},{},{},{},{},{},{},{},{},{}\n",
+                ",{},{},{},{},{},{},{},{},{},{},{}\n",
                 read_stats.nodes,
                 read_stats.bytes,
                 read_stats.node_branches,
                 read_stats.leaf_nodes,
                 read_stats.leaf_value_bytes,
+                cache_hits,
                 write_stats.nodes,
                 write_stats.bytes,
                 write_stats.node_branches,
@@ -257,6 +264,7 @@ impl ReadableStorage for FileBacked {
         };
         // reset read stats
         *read_stats = IOStats::default();
+        *cache_hits = 0;
         guard.0.write_all(msg.as_bytes()).unwrap();
     }
 
