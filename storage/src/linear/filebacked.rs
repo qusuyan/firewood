@@ -229,8 +229,7 @@ impl ReadableStorage for FileBacked {
 
     fn log(&self, root_hash: Option<TrieHash>, write_stats: IOStats) {
         let mut guard = self.log.lock().unwrap();
-        let read_stats = &mut guard.1;
-        let cache_hits = &mut guard.2;
+        let (fd, read_stats, cache_hits) = &mut *guard;
         let msg = match root_hash {
             Some(hash) => format!(
                 "{},{},{},{},{},{},{},{},{},{},{},{}\n",
@@ -265,7 +264,7 @@ impl ReadableStorage for FileBacked {
         // reset read stats
         *read_stats = IOStats::default();
         *cache_hits = 0;
-        guard.0.write_all(msg.as_bytes()).unwrap();
+        fd.write_all(msg.as_bytes()).unwrap();
     }
 
     fn record_node_read(&self, node: &SharedNode, length: usize) {
