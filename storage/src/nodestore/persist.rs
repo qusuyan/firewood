@@ -29,7 +29,7 @@
 
 use std::iter::FusedIterator;
 
-use crate::linear::FileIoError;
+use crate::linear::{FileIoError, IOStats};
 use crate::nodestore::AreaIndex;
 use crate::{Node, firewood_counter};
 use coarsetime::Instant;
@@ -279,18 +279,14 @@ impl<S: WritableStorage + 'static> NodeStore<Committed, S> {
         }
 
         use crate::HashedNodeReader;
-        if let Some(root) = self.root_hash() {
-            self.storage.log(format!(
-                "{},{},{},{},{},{}\n",
-                root, nodes_persisted, bytes_written, branch_factors, leaf_nodes, leaf_value_bytes
-            ));
-        } else {
-            assert!(self.root_node().is_none());
-            self.storage.log(format!(
-                ",{},{},{},{},{}\n",
-                nodes_persisted, bytes_written, branch_factors, leaf_nodes, leaf_value_bytes
-            ));
-        }
+        let write_stats = IOStats {
+            nodes: nodes_persisted,
+            bytes: bytes_written,
+            leaf_nodes,
+            leaf_value_bytes,
+            node_branches: branch_factors,
+        };
+        self.storage.log(self.root_hash(), write_stats);
         self.storage.write_cached_nodes(cached_nodes)?;
 
         let flush_time = flush_start.elapsed().as_millis();
@@ -511,18 +507,14 @@ impl NodeStore<Committed, FileBacked> {
         let flush_time = flush_start.elapsed().as_millis();
         firewood_counter!("firewood.flush_nodes", "amount flushed nodes").increment(flush_time);
 
-        if let Some(root) = self.root_hash() {
-            self.storage.log(format!(
-                "{},{},{},{},{},{}\n",
-                root, nodes_persisted, bytes_written, branch_factors, leaf_nodes, leaf_value_bytes
-            ));
-        } else {
-            assert!(self.root_node().is_none());
-            self.storage.log(format!(
-                ",{},{},{},{},{}\n",
-                nodes_persisted, bytes_written, branch_factors, leaf_nodes, leaf_value_bytes
-            ));
-        }
+        let write_stats = IOStats {
+            nodes: nodes_persisted,
+            bytes: bytes_written,
+            leaf_nodes,
+            leaf_value_bytes: leaf_value_bytes,
+            node_branches: branch_factors,
+        };
+        self.storage.log(self.root_hash(), write_stats);
 
         Ok(header)
     }
