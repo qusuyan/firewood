@@ -469,7 +469,7 @@ impl NodeStore<Committed, FileBacked> {
             }
 
             nodes_persisted += 1;
-            bytes_written += 1;
+            bytes_written += serialized.len();
             match shared_node.as_ref() {
                 Node::Branch(branch) => {
                     branch_factors += branch.children_iter().count();
