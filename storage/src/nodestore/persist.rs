@@ -417,6 +417,17 @@ impl NodeStore<Committed, FileBacked> {
                 node_allocator.allocate_node(serialized.as_slice())?;
             *serialized.get_mut(0).expect("byte was reserved") = area_size_index.get();
             let mut serialized = serialized.into_boxed_slice();
+            nodes_persisted += 1;
+            bytes_written += serialized.len();
+            match shared_node.as_ref() {
+                Node::Branch(branch) => {
+                    branch_factors += branch.children_iter().count();
+                }
+                Node::Leaf(leaf) => {
+                    leaf_nodes += 1;
+                    leaf_value_bytes += leaf.value.len();
+                }
+            }
 
             loop {
                 // Find the first available write buffer, enumerate to get the position for marking it completed
@@ -466,18 +477,6 @@ impl NodeStore<Committed, FileBacked> {
                     completion_queue,
                     &mut saved_pinned_buffers,
                 )?;
-            }
-
-            nodes_persisted += 1;
-            bytes_written += serialized.len();
-            match shared_node.as_ref() {
-                Node::Branch(branch) => {
-                    branch_factors += branch.children_iter().count();
-                }
-                Node::Leaf(leaf) => {
-                    leaf_nodes += 1;
-                    leaf_value_bytes += leaf.value.len();
-                }
             }
 
             // Allocate the node to store the address, then collect for caching and persistence
