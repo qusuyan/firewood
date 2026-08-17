@@ -125,6 +125,7 @@ Basic Stats:
     Firewood Image Size / High Watermark (high_watermark): {{high_watermark}}
     Total Key-Value Count (kv_count): {{kv_count}}
     Total Key-Value Bytes (kv_bytes): {{kv_bytes}}
+    Key Size Distribution (key_dist): {{key_dist}}
 
 Trie Stats:
     Branching Factor Distribution: {{branching_factors}}
@@ -166,6 +167,7 @@ struct DBStatsReport {
     high_watermark: String,
     kv_count: String,
     kv_bytes: String,
+    key_dist: String,
     // Trie stats
     branching_factors: String,
     depths: String,
@@ -253,6 +255,7 @@ fn print_stats_report(db_stats: DBStats) {
         high_watermark: format_u64(db_stats.high_watermark),
         kv_count: format_u64(db_stats.trie_stats.kv_count),
         kv_bytes: format_u64(db_stats.trie_stats.kv_bytes),
+        key_dist: format_map(&db_stats.trie_stats.key_size_distribution),
         branching_factors: format_map(&db_stats.trie_stats.branching_factors),
         depths: format_map(&db_stats.trie_stats.depths),
         branch_bytes: format_u64(db_stats.trie_stats.branch_bytes),
