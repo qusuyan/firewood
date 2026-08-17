@@ -116,6 +116,8 @@ pub struct TrieStats {
     pub area_extra_unaligned_page: u64,
     /// The number of nodes that span an extra page due to not being aligned
     pub node_extra_unaligned_page: u64,
+    /// The distribution of key size for each key-value pair stored in the trie
+    pub key_size_distribution: BTreeMap<usize, u64>,
 }
 
 impl Default for TrieStats {
@@ -133,6 +135,7 @@ impl Default for TrieStats {
             low_occupancy_leaf_area_count: 0,
             area_extra_unaligned_page: 0,
             node_extra_unaligned_page: 0,
+            key_size_distribution: BTreeMap::new(),
         }
     }
 }
@@ -372,6 +375,11 @@ where
                     .kv_bytes
                     .saturating_add(key_bytes as u64)
                     .saturating_add(value_bytes as u64);
+                trie_stats
+                    .key_size_distribution
+                    .entry(key_bytes)
+                    .and_modify(|count| *count = count.saturating_add(1))
+                    .or_insert(1);
             }
             // collect the number of areas that requires reading an extra page due to not being aligned
             if extra_read_pages(subtrie_root_address, area_size)
@@ -856,6 +864,7 @@ mod test {
             low_occupancy_leaf_area_count: 0,
             area_extra_unaligned_page: 0,
             node_extra_unaligned_page: 0,
+            key_size_distribution: BTreeMap::from([(32, 1)]),
         };
 
         TestTrie {
