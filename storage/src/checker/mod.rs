@@ -100,10 +100,12 @@ pub struct TrieStats {
     pub kv_count: u64,
     /// The total number of bytes of for key-value pairs stored in the trie
     pub kv_bytes: u64,
+    /// The distribution of key size for each key-value pair stored in the trie
+    pub key_size_distribution: BTreeMap<usize, u64>,
     /// Branching factor distribution of each branch node
     pub branching_factors: BTreeMap<usize, u64>,
-    /// Depth distribution of each leaf node
-    pub depths: BTreeMap<usize, u64>,
+    /// Depth distribution of each node storing value
+    pub depths: BTreeMap<usize, BTreeMap<usize, u64>>,
     /// The distribution of area sizes for branch nodes
     pub branch_area_counts: BTreeMap<u64, u64>,
     /// The distribution of area sizes for leaf nodes
@@ -116,8 +118,6 @@ pub struct TrieStats {
     pub area_extra_unaligned_page: u64,
     /// The number of nodes that span an extra page due to not being aligned
     pub node_extra_unaligned_page: u64,
-    /// The distribution of key size for each key-value pair stored in the trie
-    pub key_size_distribution: BTreeMap<usize, u64>,
 }
 
 impl Default for TrieStats {
@@ -380,6 +380,13 @@ where
                     .entry(key_bytes)
                     .and_modify(|count| *count = count.saturating_add(1))
                     .or_insert(1);
+                trie_stats
+                    .depths
+                    .entry(key_bytes)
+                    .or_default()
+                    .entry(depth)
+                    .and_modify(|cnt| *cnt = cnt.saturating_add(1))
+                    .or_insert(1);
             }
             // collect the number of areas that requires reading an extra page due to not being aligned
             if extra_read_pages(subtrie_root_address, area_size)
@@ -473,9 +480,6 @@ where
                     trie_stats.low_occupancy_leaf_area_count =
                         trie_stats.low_occupancy_leaf_area_count.saturating_add(1);
                 }
-                // collect the depth distribution
-                let depth_count = trie_stats.depths.entry(depth).or_insert(0);
-                *depth_count = depth_count.saturating_add(1);
             }
         }
 
@@ -858,13 +862,13 @@ mod test {
             kv_bytes: 32 + 3, // 32 bytes for the key, 3 bytes for the value
             branch_area_counts,
             leaf_area_counts,
+            key_size_distribution: BTreeMap::from([(32, 1)]),
             branching_factors: BTreeMap::from([(1, 2)]),
-            depths: BTreeMap::from([(2, 1)]),
+            depths: BTreeMap::from([(32, BTreeMap::from([(2, 1)]))]),
             low_occupancy_branch_area_count: 0,
             low_occupancy_leaf_area_count: 0,
             area_extra_unaligned_page: 0,
             node_extra_unaligned_page: 0,
-            key_size_distribution: BTreeMap::from([(32, 1)]),
         };
 
         TestTrie {

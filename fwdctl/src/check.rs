@@ -221,6 +221,25 @@ fn format_map(map: &BTreeMap<impl ToFormattedString, impl ToFormattedString>) ->
         .join(", ")
 }
 
+fn format_map_nested(
+    map: &BTreeMap<
+        impl ToFormattedString,
+        BTreeMap<impl ToFormattedString, impl ToFormattedString>,
+    >,
+) -> String {
+    map.iter()
+        .map(|(key, inner_map)| {
+            let inner_str = format_map(inner_map);
+            format!(
+                "{}: {{{}}}",
+                key.to_formatted_string(&Locale::en),
+                inner_str
+            )
+        })
+        .collect::<Vec<String>>()
+        .join(", ")
+}
+
 #[expect(clippy::cast_precision_loss)]
 fn format_percent(numerator: u64, denominator: u64) -> String {
     format!("{:.2}%", (numerator as f64 / denominator as f64) * 100.0)
@@ -257,7 +276,7 @@ fn print_stats_report(db_stats: DBStats) {
         kv_bytes: format_u64(db_stats.trie_stats.kv_bytes),
         key_dist: format_map(&db_stats.trie_stats.key_size_distribution),
         branching_factors: format_map(&db_stats.trie_stats.branching_factors),
-        depths: format_map(&db_stats.trie_stats.depths),
+        depths: format_map_nested(&db_stats.trie_stats.depths),
         branch_bytes: format_u64(db_stats.trie_stats.branch_bytes),
         total_branch_area_count: format_u64(total_branch_area_count),
         total_branch_area_bytes: format_u64(total_branch_area_bytes),
