@@ -36,6 +36,9 @@ mod path;
 mod test_utils;
 mod tries;
 mod u4;
+/// Optional CSV logging of storage writes, enabled by the `FIREWOOD_WRITE_LOG`
+/// environment variable
+pub mod write_log;
 
 /// Logger module for handling logging functionality
 pub mod logger;

@@ -55,6 +55,10 @@ impl NodeStoreHeader {
     pub fn flush_to<S: WritableStorage>(&self, storage: &S) -> Result<(), FileIoError> {
         let header_bytes = bytemuck::bytes_of(self);
         storage.write(0, header_bytes)?;
+
+        if crate::write_log::enabled() {
+            crate::write_log::record(0, header_bytes.len(), crate::write_log::Details::Header);
+        }
         Ok(())
     }
 }
@@ -153,6 +157,29 @@ impl<N: NodeReader + RootReader> Iterator for UnPersistedNodeIterator<'_, N> {
 
         // No more children to process, pop the next node from the stack
         self.stack.pop()
+    }
+}
+
+/// Log every trie-node write of a batch.
+///
+/// Only called when [`crate::write_log::enabled`] returns true, after the
+/// batch was successfully written. The nodes of a batch are handed to the
+/// storage backend as one vectored write, but each node is logged individually
+/// since each lands at its own offset.
+fn log_trie_node_batch(allocated_objects: &[(&[u8], crate::LinearAddress, MaybePersistedNode)]) {
+    for &(data, addr, _) in allocated_objects {
+        // The first byte of a serialized node is its area size index; recover
+        // it to log the size of the allocated area.
+        let area_size = data
+            .first()
+            .and_then(|&byte| crate::AreaIndex::try_from(byte).ok())
+            .map(crate::AreaIndex::size);
+
+        crate::write_log::record(
+            addr.get(),
+            data.len(),
+            crate::write_log::Details::TrieNode { area_size },
+        );
     }
 }
 
@@ -265,6 +292,10 @@ impl<S: WritableStorage> NodeStore<Committed, S> {
                 .iter()
                 .map(|&(data, addr, _)| (addr.get(), data)),
         )?;
+
+        if crate::write_log::enabled() {
+            log_trie_node_batch(&allocated_objects);
+        }
 
         self.storage
             .write_cached_nodes(allocated_objects.into_iter().map(|(_, _, node)| node))?;

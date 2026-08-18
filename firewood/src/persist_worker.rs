@@ -513,6 +513,9 @@ impl PersistLoop {
     /// Processes pending work until shutdown or an error occurs.
     fn event_loop(&self) -> Result<(), PersistError> {
         while let Ok(mut persist_data) = self.shared.channel.pop() {
+            // Group the writes of this iteration together in the write log.
+            firewood_storage::write_log::begin_group();
+
             for nodestore in std::mem::take(&mut persist_data.pending_reaps) {
                 self.reap(nodestore)?;
             }
@@ -527,6 +530,7 @@ impl PersistLoop {
         if let Some(revision) = self.shared.persist_on_shutdown.get().cloned()
             && !self.shared.channel.empty()
         {
+            firewood_storage::write_log::begin_group();
             self.persist_to_disk(&revision)
                 .and_then(|()| self.maybe_save_to_root_store(&revision))?;
         }

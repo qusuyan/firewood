@@ -32,6 +32,7 @@ use std::io::{Error, ErrorKind, Read};
 use std::iter::FusedIterator;
 use std::mem::size_of;
 
+use crate::write_log;
 use crate::{FreeListParent, MaybePersistedNode, ReadableStorage, WritableStorage};
 
 /// Returns the maximum size needed to encode a `VarInt`.
@@ -323,14 +324,23 @@ impl<S: WritableStorage> NodeAllocator<'_, S> {
         firewood_metrics::firewood_increment!(crate::registry::SPACE_FREED, area_size_index.size(), "index" => index_name(area_size_index));
 
         // The area that contained the node is now free.
+        let old_head = self.header.free_lists()[area_size_index.as_usize()];
         let mut stored_area_bytes = Vec::new();
-        FreeArea::new(self.header.free_lists()[area_size_index.as_usize()])
-            .as_bytes(area_size_index, &mut stored_area_bytes);
+        FreeArea::new(old_head).as_bytes(area_size_index, &mut stored_area_bytes);
 
         self.storage.write(addr.into(), &stored_area_bytes)?;
 
-        self.storage
-            .add_to_free_list_cache(addr, self.header.free_lists()[area_size_index.as_usize()]);
+        if write_log::enabled() {
+            write_log::record(
+                addr.get(),
+                stored_area_bytes.len(),
+                write_log::Details::FreeArea {
+                    area_size: area_size_index.size(),
+                },
+            );
+        }
+
+        self.storage.add_to_free_list_cache(addr, old_head);
 
         // The newly freed block is now the head of the free list.
         self.header.free_lists_mut()[area_size_index.as_usize()] = Some(addr);
@@ -342,6 +352,14 @@ impl<S: WritableStorage> NodeAllocator<'_, S> {
         let free_list_bytes = bytemuck::bytes_of(self.header.free_lists());
         let free_list_offset = NodeStoreHeader::free_lists_offset();
         self.storage.write(free_list_offset, free_list_bytes)?;
+
+        if write_log::enabled() {
+            write_log::record(
+                free_list_offset,
+                free_list_bytes.len(),
+                write_log::Details::FreeListHeads,
+            );
+        }
         Ok(())
     }
 }
@@ -543,6 +561,15 @@ impl<T, S: WritableStorage> NodeStore<T, S> {
                 let mut stored_area_bytes = Vec::new();
                 free_area.as_bytes(area_size_idx, &mut stored_area_bytes);
                 self.storage.write(parent_addr.into(), &stored_area_bytes)?;
+                if write_log::enabled() {
+                    write_log::record(
+                        parent_addr.get(),
+                        stored_area_bytes.len(),
+                        write_log::Details::FreeAreaTruncate {
+                            area_size: area_size_idx.size(),
+                        },
+                    );
+                }
                 Ok(())
             }
         }
@@ -957,6 +984,64 @@ mod tests {
         // `move_to_next_free_list` will do nothing since we are already at the end
         assert!(free_list_iter.current_free_list.is_none());
         assert!(free_list_iter.next_with_metadata().is_none());
+    }
+
+    #[test]
+    fn delete_node_writes_free_area_and_updates_freelist() {
+        use crate::NodeHashAlgorithm;
+        use crate::node::{LeafNode, Node};
+
+        let memstore = MemStore::default();
+        let nodestore = NodeStore::new_empty_committed(memstore.into());
+        let mut header = NodeStoreHeader::new(NodeHashAlgorithm::compile_option());
+
+        let leaf = Node::Leaf(LeafNode {
+            partial_path: crate::Path::from(&[1, 2, 3][..]),
+            value: vec![4, 5, 6].into_boxed_slice(),
+        });
+
+        // Write two nodes back to back after the header.
+        let offset1 = NodeStoreHeader::SIZE;
+        let (_, area_size) = test_utils::test_write_new_node(&nodestore, &leaf, offset1);
+        let offset2 = offset1 + area_size;
+        test_utils::test_write_new_node(&nodestore, &leaf, offset2);
+
+        let area_index = AreaIndex::from_size(area_size).unwrap();
+        let addr1 = LinearAddress::new(offset1).unwrap();
+        let addr2 = LinearAddress::new(offset2).unwrap();
+
+        // Deleting the first node writes a FreeArea with no successor and
+        // makes it the freelist head.
+        {
+            let mut allocator = NodeAllocator::new(nodestore.storage.as_ref(), &mut header);
+            allocator
+                .delete_node(MaybePersistedNode::from(addr1))
+                .unwrap();
+        }
+        assert_eq!(header.free_lists()[area_index.as_usize()], Some(addr1));
+        let (free_area, stored_index) =
+            FreeArea::from_storage(nodestore.storage.as_ref(), addr1).unwrap();
+        assert_eq!(stored_index, area_index);
+        assert_eq!(free_area.next_free_block(), None);
+
+        // Deleting the second node prepends it: the new on-disk FreeArea
+        // points at the previous head, and the in-memory head is updated.
+        {
+            let mut allocator = NodeAllocator::new(nodestore.storage.as_ref(), &mut header);
+            allocator
+                .delete_node(MaybePersistedNode::from(addr2))
+                .unwrap();
+            allocator.flush_freelist().unwrap();
+        }
+        assert_eq!(header.free_lists()[area_index.as_usize()], Some(addr2));
+        let (free_area, stored_index) =
+            FreeArea::from_storage(nodestore.storage.as_ref(), addr2).unwrap();
+        assert_eq!(stored_index, area_index);
+        assert_eq!(free_area.next_free_block(), Some(addr1));
+
+        // The first area is unchanged and still terminates the list.
+        let (free_area, _) = FreeArea::from_storage(nodestore.storage.as_ref(), addr1).unwrap();
+        assert_eq!(free_area.next_free_block(), None);
     }
 
     #[test]
